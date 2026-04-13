@@ -1,0 +1,20 @@
+# Environment
+.env
+.env.local
+
+# Dependencies
+node_modules/
+
+# Generated output
+output/
+
+# Run log (optional: remove this line to track history in git)
+run-log.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

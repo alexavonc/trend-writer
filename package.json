@@ -1,0 +1,22 @@
+{
+  "name": "trend-writer",
+  "version": "1.0.0",
+  "description": "CLI tool that scrapes trending tweets and generates long-form articles using Claude",
+  "type": "module",
+  "main": "src/generate.js",
+  "bin": {
+    "trend-writer": "./src/generate.js"
+  },
+  "scripts": {
+    "start": "node src/generate.js",
+    "dry-run": "node src/generate.js --dry-run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "dotenv": "^16.4.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
