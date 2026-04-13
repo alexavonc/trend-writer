@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>trend-writer · adora</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#5B47F5">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="trend-writer">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app" id="app">
+
+    <!-- ── Left panel: article list ──────────────────────────────────────── -->
+    <aside class="panel-left" id="panel-left">
+      <header class="sidebar-header">
+        <div class="logo">
+          <img src="/icon.svg" alt="adora">
+          <span>adora</span>
+        </div>
+        <div class="header-actions">
+          <button class="btn-icon" id="notif-btn" title="Enable notifications" aria-label="Enable push notifications">
+            🔔
+          </button>
+          <button class="btn btn-primary" id="generate-btn">
+            <span id="generate-label">Generate</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="generating-banner" id="generating-banner" hidden>
+        <div class="spinner"></div>
+        <span id="generating-text">Generating articles…</span>
+      </div>
+
+      <div class="article-list" id="article-list">
+        <div class="empty-list">Loading…</div>
+      </div>
+    </aside>
+
+    <!-- ── Right panel: article detail ──────────────────────────────────── -->
+    <main class="panel-right" id="panel-right">
+      <div class="back-bar" id="back-bar">
+        <button class="btn-back" id="back-btn">← Back</button>
+      </div>
+
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">✦</div>
+        <p>Select an article to read</p>
+        <p class="empty-sub">Or click <strong>Generate</strong> to create new ones</p>
+      </div>
+
+      <article class="article-view" id="article-view" hidden>
+        <div class="article-hero" id="article-hero" hidden></div>
+
+        <div class="article-content">
+          <div class="article-meta" id="article-meta"></div>
+          <div class="article-body" id="article-body"></div>
+          <div class="article-actions">
+            <button class="btn btn-outline" id="copy-btn">Copy article</button>
+            <button class="btn btn-outline" id="posted-btn">Mark as posted</button>
+          </div>
+        </div>
+      </article>
+    </main>
+
+  </div>
+
+  <!-- marked.js for markdown → HTML rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

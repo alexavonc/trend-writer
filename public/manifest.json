@@ -1,0 +1,17 @@
+{
+  "name": "trend-writer by adora",
+  "short_name": "trend-writer",
+  "description": "Weekly AI trend articles, curated for designers",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F3EE",
+  "theme_color": "#5B47F5",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -8,7 +8,12 @@ node_modules/
 # Generated output
 output/
 
-# Run log (optional: remove this line to track history in git)
+# Data (articles, push subscriptions, VAPID keys)
+# Keep the directory tracked but not the data files
+data/
+!data/.gitkeep
+
+# Run log
 run-log.json
 
 # OS / editor

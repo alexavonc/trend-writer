@@ -5,87 +5,74 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT_DIR = path.resolve(__dirname, '..');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+const ROOT_DIR   = path.resolve(__dirname, '..');
 
-// ── Config ────────────────────────────────────────────────────────────────────
+// ── Config (read once at module load) ─────────────────────────────────────────
 const APIFY_TOKEN       = process.env.APIFY_TOKEN;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const KEYWORDS          = (process.env.KEYWORDS || '').split(',').map(k => k.trim()).filter(Boolean);
-const ARTICLE_STYLE     = (process.env.ARTICLE_STYLE || 'listicle').toLowerCase();
 const TWEETS_PER_KW     = parseInt(process.env.TWEETS_PER_KEYWORD || '30', 10);
+const ARTICLE_STYLE     = (process.env.ARTICLE_STYLE || 'listicle').toLowerCase();
 const OUTPUT_DIR        = path.resolve(ROOT_DIR, process.env.OUTPUT_DIR || 'output');
 
-const APIFY_ACTOR_ID    = 'kaitoeasyapi~twitter-x-data-tweet-scraper-pay-per-result-cheapest';
-const APIFY_RUN_URL     = `https://api.apify.com/v2/acts/${APIFY_ACTOR_ID}/run-sync-get-dataset-items`;
-
-const DRY_RUN = process.argv.includes('--dry-run');
+const APIFY_ACTOR_ID = 'kaitoeasyapi~twitter-x-data-tweet-scraper-pay-per-result-cheapest';
+const APIFY_RUN_URL  = `https://api.apify.com/v2/acts/${APIFY_ACTOR_ID}/run-sync-get-dataset-items`;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function sleep(ms) {
+
+export function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function todayStamp() {
-  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  return new Date().toISOString().slice(0, 10);
 }
 
 function slugify(text) {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-function validateEnv() {
-  const missing = [];
-  if (!APIFY_TOKEN)       missing.push('APIFY_TOKEN');
-  if (!ANTHROPIC_API_KEY) missing.push('ANTHROPIC_API_KEY');
-  if (KEYWORDS.length === 0) missing.push('KEYWORDS');
-  if (!['listicle', 'explainer'].includes(ARTICLE_STYLE)) {
-    console.error(`ARTICLE_STYLE must be "listicle" or "explainer", got: "${ARTICLE_STYLE}"`);
-    process.exit(1);
-  }
-  if (missing.length > 0) {
-    console.error(`Missing required env vars: ${missing.join(', ')}`);
-    process.exit(1);
-  }
+function extractTitle(markdown) {
+  const m = markdown.match(/^#\s+(.+)$/m);
+  return m ? m[1].trim() : 'Untitled';
+}
+
+function extractSeoKeywords(markdown) {
+  const m = markdown.match(/\*\*SEO keywords:\*\*\s*(.+)$/im);
+  if (!m) return [];
+  return m[1].split(',').map(k => k.trim()).filter(Boolean);
+}
+
+function countWords(text) {
+  return text.split(/\s+/).filter(Boolean).length;
 }
 
 // ── Apify: fetch tweets ───────────────────────────────────────────────────────
-async function fetchTweets(keyword) {
-  console.log(`  Fetching ${TWEETS_PER_KW} tweets for: "${keyword}" …`);
 
+export async function fetchTweets(keyword) {
   const url = `${APIFY_RUN_URL}?token=${APIFY_TOKEN}&timeout=120&memory=256`;
-
-  const input = {
-    searchTerms: [keyword],
-    maxItems: TWEETS_PER_KW,
-    queryType: 'Top',
-    lang: 'en',
-  };
-
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      searchTerms: [keyword],
+      maxItems: TWEETS_PER_KW,
+      queryType: 'Top',
+      lang: 'en',
+    }),
   });
-
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Apify request failed [${res.status}]: ${body.slice(0, 300)}`);
+    throw new Error(`Apify [${res.status}]: ${body.slice(0, 200)}`);
   }
-
   const data = await res.json();
-
-  if (!Array.isArray(data) || data.length === 0) {
-    console.warn(`  No tweets returned for "${keyword}"`);
-    return [];
-  }
-
-  console.log(`  Got ${data.length} tweets`);
-  return data;
+  return Array.isArray(data) ? data : [];
 }
 
-// ── Summarise tweets for Claude prompt ───────────────────────────────────────
-function buildTweetSummaries(tweets) {
+// ── Tweet summariser ──────────────────────────────────────────────────────────
+
+export function buildTweetSummaries(tweets) {
   return tweets
     .map((t, i) => {
       const text    = (t.text || t.full_text || t.tweet_text || '').replace(/\s+/g, ' ').trim();
@@ -93,28 +80,40 @@ function buildTweetSummaries(tweets) {
       const likes   = t.likeCount   ?? t.favorite_count ?? 0;
       const rts     = t.retweetCount ?? t.retweet_count  ?? 0;
       const replies = t.replyCount  ?? t.reply_count     ?? 0;
-      const engagement = likes + rts * 2 + replies;
-      return { index: i + 1, author, text, engagement, likes, rts, replies };
+      return { i: i + 1, author, text, score: likes + rts * 2 + replies, likes, rts, replies };
     })
-    .sort((a, b) => b.engagement - a.engagement)
-    .map(t => `[${t.index}] @${t.author} (👍${t.likes} 🔁${t.rts} 💬${t.replies}): ${t.text}`)
+    .sort((a, b) => b.score - a.score)
+    .map(t => `[${t.i}] @${t.author} (👍${t.likes} 🔁${t.rts} 💬${t.replies}): ${t.text}`)
     .join('\n');
 }
 
-// ── Claude: generate article ──────────────────────────────────────────────────
-async function generateArticle(client, keyword, tweetSummaries) {
-  const isListicle = ARTICLE_STYLE === 'listicle';
+// ── Claude: generate article content ─────────────────────────────────────────
+
+export async function generateArticleContent(keyword, tweetSummaries, style = ARTICLE_STYLE) {
+  const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+  const isListicle = style === 'listicle';
 
   const styleGuide = isListicle
-    ? `Write a listicle-style article (600–900 words). Use a catchy H1 title, then 7–10 numbered sections each with a bold subheading. Be punchy and direct.`
-    : `Write an explainer-style article (700–1000 words). Use a compelling H1 title followed by flowing paragraphs with H2 subheadings. Build a coherent argument or narrative.`;
+    ? `Write a listicle (600–900 words). H1 title + 7–10 numbered points each with a bold subheading. Punchy, scannable, direct.`
+    : `Write an explainer (700–1000 words). H1 title + flowing paragraphs with H2 subheadings. Build a clear, coherent narrative.`;
 
-  const systemPrompt = `You are a sharp, opinionated tech journalist who synthesises social media signals into insightful long-form articles. Your writing is clear, direct, and never dull. You never quote tweets verbatim — instead you paraphrase, synthesise, and interpret the underlying ideas and sentiment. You write in clean Markdown.`;
+  const message = await client.messages.create({
+    model: 'claude-opus-4-5',
+    max_tokens: 1800,
+    system: [
+      {
+        type: 'text',
+        text: `You are a sharp writer for designers and product people who want to stay on top of AI without wading through hype. Your tone is knowledgeable but casual — like a senior product designer explaining complex AI updates to a smart friend who isn't deep in tech. You never quote tweets verbatim; you paraphrase, synthesise, and draw your own conclusions. You write clean Markdown only.`,
+        cache_control: { type: 'ephemeral' },
+      },
+    ],
+    messages: [
+      {
+        role: 'user',
+        content: `KEYWORD: ${keyword}
+STYLE: ${style}
 
-  const userPrompt = `KEYWORD: ${keyword}
-STYLE: ${ARTICLE_STYLE}
-
-Here are the top tweets by engagement on this topic:
+Top tweets by engagement:
 
 ${tweetSummaries}
 
@@ -123,68 +122,47 @@ ${tweetSummaries}
 ${styleGuide}
 
 Requirements:
-- Synthesise the ideas and sentiment from the tweets above — do NOT quote any tweet verbatim
-- Opinionated, confident voice; take positions, don't just describe
-- Clean Markdown formatting (H1 title, H2/bold subheadings, short paragraphs)
-- End the article with a final line formatted exactly as:
-  **SEO keywords:** ${keyword}, [3–5 related keyword phrases separated by commas]
+- Synthesise ideas from the tweets — no verbatim quotes
+- Casual but confident voice; take positions, explain jargon plainly
+- Clean Markdown (H1 title, H2/bold subheadings, short paragraphs)
+- End with exactly: **SEO keywords:** ${keyword}, [3–5 related keyword phrases]
 
-Write the complete article now.`;
-
-  console.log(`  Calling Claude (${ARTICLE_STYLE}) …`);
-
-  const message = await client.messages.create({
-    model: 'claude-opus-4-5',
-    max_tokens: 1800,
-    system: [
-      {
-        type: 'text',
-        text: systemPrompt,
-        cache_control: { type: 'ephemeral' },
+Write the complete article now.`,
       },
-    ],
-    messages: [
-      { role: 'user', content: userPrompt },
     ],
   });
 
   const content = message.content[0];
-  if (content.type !== 'text') throw new Error('Unexpected response type from Claude');
+  if (content.type !== 'text') throw new Error('Unexpected Claude response type');
   return content.text;
 }
 
-// ── Save article to disk ──────────────────────────────────────────────────────
-async function saveArticle(keyword, articleMarkdown) {
-  await fs.mkdir(OUTPUT_DIR, { recursive: true });
-  const filename = `${todayStamp()}-${slugify(keyword)}.md`;
-  const filepath = path.join(OUTPUT_DIR, filename);
-  await fs.writeFile(filepath, articleMarkdown, 'utf8');
-  console.log(`  Saved → ${path.relative(ROOT_DIR, filepath)}`);
-  return filename;
+// ── Core export: generate one article for a keyword ───────────────────────────
+
+export async function generateArticleForKeyword(keyword) {
+  console.log(`  Fetching tweets for "${keyword}"…`);
+  const tweets = await fetchTweets(keyword);
+  if (!tweets.length) throw new Error(`No tweets returned for "${keyword}"`);
+
+  const summaries = buildTweetSummaries(tweets);
+
+  console.log(`  Generating article with Claude…`);
+  const markdown    = await generateArticleContent(keyword, summaries);
+  const title       = extractTitle(markdown);
+  const seoKeywords = extractSeoKeywords(markdown);
+  const tweetCount  = tweets.length;
+
+  return { keyword, markdown, title, seoKeywords, tweetCount };
 }
 
-// ── Write run log ─────────────────────────────────────────────────────────────
-async function writeRunLog(log) {
-  const logPath = path.join(ROOT_DIR, 'run-log.json');
-  let existing = [];
-  try {
-    const raw = await fs.readFile(logPath, 'utf8');
-    existing = JSON.parse(raw);
-    if (!Array.isArray(existing)) existing = [existing];
-  } catch {
-    // no prior log
-  }
-  existing.push(log);
-  await fs.writeFile(logPath, JSON.stringify(existing, null, 2), 'utf8');
-  console.log(`\nRun log updated → run-log.json`);
-}
+// ── CLI (only runs when executed directly) ────────────────────────────────────
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-async function main() {
-  console.log('=== trend-writer ===');
+if (process.argv[1] === __filename) {
+  const DRY_RUN  = process.argv.includes('--dry-run');
+  const KEYWORDS = (process.env.KEYWORDS || '').split(',').map(k => k.trim()).filter(Boolean);
 
   if (DRY_RUN) {
-    console.log('\n[DRY RUN] — no API calls will be made\n');
+    console.log('=== trend-writer (dry-run) ===\n');
     console.log(`Keywords  : ${KEYWORDS.join(', ') || '(none set)'}`);
     console.log(`Style     : ${ARTICLE_STYLE}`);
     console.log(`Tweets/kw : ${TWEETS_PER_KW}`);
@@ -197,64 +175,45 @@ async function main() {
       console.log(`    3. Save → ${OUTPUT_DIR}/${todayStamp()}-${slugify(kw)}.md`);
     }
     console.log('\n[DRY RUN] Done.');
-    return;
+    process.exit(0);
   }
 
-  validateEnv();
+  if (!APIFY_TOKEN || !ANTHROPIC_API_KEY || !KEYWORDS.length) {
+    console.error('Missing required env vars: APIFY_TOKEN, ANTHROPIC_API_KEY, KEYWORDS');
+    process.exit(1);
+  }
 
-  const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+  (async () => {
+    await fs.mkdir(OUTPUT_DIR, { recursive: true });
+    const runLog = { runAt: new Date().toISOString(), style: ARTICLE_STYLE, keywords: KEYWORDS, results: [] };
 
-  const runLog = {
-    runAt: new Date().toISOString(),
-    style: ARTICLE_STYLE,
-    keywords: KEYWORDS,
-    results: [],
-  };
-
-  for (let i = 0; i < KEYWORDS.length; i++) {
-    const keyword = KEYWORDS[i];
-    console.log(`\n[${i + 1}/${KEYWORDS.length}] Keyword: "${keyword}"`);
-
-    const result = { keyword, status: 'error', file: null, error: null };
-
-    try {
-      const tweets = await fetchTweets(keyword);
-
-      if (tweets.length === 0) {
-        result.error = 'No tweets returned';
-        runLog.results.push(result);
-        continue;
+    for (let i = 0; i < KEYWORDS.length; i++) {
+      const kw = KEYWORDS[i];
+      console.log(`\n[${i + 1}/${KEYWORDS.length}] Keyword: "${kw}"`);
+      try {
+        const { markdown } = await generateArticleForKeyword(kw);
+        const filename = `${todayStamp()}-${slugify(kw)}.md`;
+        await fs.writeFile(path.join(OUTPUT_DIR, filename), markdown, 'utf8');
+        console.log(`  Saved → output/${filename}`);
+        runLog.results.push({ keyword: kw, status: 'ok', file: filename });
+      } catch (err) {
+        console.error(`  Error: ${err.message}`);
+        runLog.results.push({ keyword: kw, status: 'error', error: err.message });
       }
-
-      const summaries = buildTweetSummaries(tweets);
-      const article   = await generateArticle(client, keyword, summaries);
-      const filename  = await saveArticle(keyword, article);
-
-      result.status = 'ok';
-      result.file   = filename;
-      result.tweetCount = tweets.length;
-    } catch (err) {
-      console.error(`  Error processing "${keyword}": ${err.message}`);
-      result.error = err.message;
+      if (i < KEYWORDS.length - 1) {
+        console.log('  Waiting 2s…');
+        await sleep(2000);
+      }
     }
 
-    runLog.results.push(result);
-
-    // 2s delay between keywords (skip after last)
-    if (i < KEYWORDS.length - 1) {
-      console.log('  Waiting 2s before next keyword…');
-      await sleep(2000);
-    }
-  }
-
-  await writeRunLog(runLog);
-
-  const ok    = runLog.results.filter(r => r.status === 'ok').length;
-  const total = runLog.results.length;
-  console.log(`\n=== Done: ${ok}/${total} articles generated ===`);
+    // Update run-log.json
+    const logPath = path.join(ROOT_DIR, 'run-log.json');
+    let existing = [];
+    try { existing = JSON.parse(await fs.readFile(logPath, 'utf8')); } catch {}
+    if (!Array.isArray(existing)) existing = [existing];
+    existing.push(runLog);
+    await fs.writeFile(logPath, JSON.stringify(existing, null, 2), 'utf8');
+    console.log('\nRun log → run-log.json');
+    console.log(`\n=== Done: ${runLog.results.filter(r => r.status === 'ok').length}/${KEYWORDS.length} articles generated ===`);
+  })().catch(e => { console.error('Fatal:', e.message); process.exit(1); });
 }
-
-main().catch(err => {
-  console.error('Fatal error:', err.message);
-  process.exit(1);
-});
