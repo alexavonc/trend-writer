@@ -24,6 +24,9 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
 a { color: inherit; }
 img { display: block; max-width: 100%; }
 
+/* Ensure hidden attribute always wins over any display rule */
+[hidden] { display: none !important; }
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg);
