@@ -46,7 +46,7 @@ async function initVapid() {
     }
   }
   webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT || 'mailto:hello@adora.so',
+    process.env.VAPID_SUBJECT || 'mailto:hello@example.com',
     keys.publicKey,
     keys.privateKey,
   );
