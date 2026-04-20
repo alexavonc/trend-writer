@@ -242,8 +242,16 @@
 
     const poll = async () => {
       try {
-        const res  = await fetch(`/api/generate/status/${jobId}`);
-        const job  = await res.json();
+        const res = await fetch(`/api/generate/status/${jobId}`);
+
+        // 404 = server restarted and lost job state — treat as done
+        if (res.status === 404) {
+          stopPolling();
+          await loadArticles();
+          return;
+        }
+
+        const job = await res.json();
 
         if (job.progress?.currentKeyword) {
           genText.textContent = `Generating ${job.progress.current}/${job.progress.total}: "${job.progress.currentKeyword}"…`;
@@ -255,10 +263,11 @@
           return;
         }
 
-        // Back-off: 3s → 3s → 5s → 5s → 10s cap
+        // Back-off: 3s → 5s → 7s → 10s cap
         if (delay < 10000) delay = Math.min(delay + 2000, 10000);
         state.pollTimer = setTimeout(poll, delay);
       } catch {
+        // Network error — keep retrying
         state.pollTimer = setTimeout(poll, delay);
       }
     };
