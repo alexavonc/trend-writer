@@ -80,18 +80,17 @@
           <div class="card-footer">${fmtDate(a.generatedAt)}</div>
         </div>`;
     }).join('');
-
-    // Attach click handlers
-    articleList.querySelectorAll('.article-card').forEach(el => {
-      el.addEventListener('click',    () => selectArticle(el.dataset.id));
-      el.addEventListener('keydown',  e => { if (e.key === 'Enter') selectArticle(el.dataset.id); });
-    });
+    // No per-card listeners — event delegation handles clicks (see bottom of file)
   }
 
   // ── Article detail ─────────────────────────────────────────────────────────
   async function selectArticle(id) {
     state.selectedId = id;
-    renderList();
+
+    // Update active class directly — no full re-render
+    articleList.querySelectorAll('.article-card').forEach(el => {
+      el.classList.toggle('active', el.dataset.id === id);
+    });
 
     // Mobile: slide to detail
     app.classList.add('article-open');
@@ -106,11 +105,13 @@
     // Fetch full article
     try {
       const res = await fetch(`/api/articles/${id}`);
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const article = await res.json();
       state.selectedFull = article;
       renderDetail(article);
     } catch (e) {
-      articleMeta.innerHTML = '<span style="color:red">Failed to load article.</span>';
+      articleMeta.innerHTML = `<span style="color:red">Failed to load article: ${e.message}</span>`;
+      console.error('selectArticle error:', e);
     }
   }
 
@@ -357,6 +358,18 @@
   generateBtn.addEventListener('click', triggerGenerate);
   backBtn.addEventListener('click', goBack);
   notifBtn.addEventListener('click', setupPush);
+
+  // Single delegated listener on the list container — survives innerHTML rebuilds
+  articleList.addEventListener('click', e => {
+    const card = e.target.closest('.article-card');
+    if (card) selectArticle(card.dataset.id);
+  });
+  articleList.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const card = e.target.closest('.article-card');
+      if (card) selectArticle(card.dataset.id);
+    }
+  });
 
   // ── Init ───────────────────────────────────────────────────────────────────
   marked.setOptions({ breaks: true, gfm: true });
